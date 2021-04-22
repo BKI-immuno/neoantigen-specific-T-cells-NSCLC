@@ -1,3 +1,9 @@
+
+##### Readme #######
+#### Raisin: code that contains the differential function that is based on a linear mixed-effects model.
+#### Run raisin: code(import the raisin as a function) to perform the actual differential analysis.
+
+
 ##############
 ### Raisin ###
 ##############
