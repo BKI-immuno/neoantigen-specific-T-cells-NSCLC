@@ -1,0 +1,293 @@
+
+library(reshape2)
+library(TSCAN)
+library(ggplot2)
+library(RColorBrewer)
+library(parallel)
+
+###########################
+###### Prepare data #######
+###########################
+
+rdir <- '/home-4/whou10@jhu.edu/scratch/Wenpin/pardoll/nsclc/pseudotime_lung/data/'
+pdir <- '/home-4/whou10@jhu.edu/scratch/Wenpin/pardoll/nsclc/pseudotime_lung/plot/'
+## ---------------------
+## load and check data
+## ---------------------
+meta <- readRDS('/home-4/whou10@jhu.edu/scratch/Wenpin/pardoll/nsclc/data/ManaT2/blood.meta.rds')
+saver <- readRDS('/home-4/whou10@jhu.edu/scratch/Wenpin/pardoll/nsclc/data/ManaT2/blood.saver.rds')
+dm <- meta[, grepl('DC', colnames(meta))]
+pt <- meta[,117]
+names(pt) <- rownames(meta)
+
+cellanno <- data.frame(cell = rownames(meta), sample = as.character(meta$tissue), stringsAsFactors = F)
+rownames(cellanno) <- cellanno[,1]
+saver <- saver[rowMeans(saver>0.01) > 0.01, ]
+design <- matrix(rep(1, length(unique(cellanno[,2]))), nrow = length(unique(cellanno[,2])))
+dimnames(design) <- list(unique(cellanno[,2]), 'intercept')
+library(here)
+here()
+library(Seurat)
+library(ggplot2)
+library(RColorBrewer)
+pdf(paste0(pdir, 'dm_tissuetime.pdf'), width = 4, height = 3)
+ggplot(data = meta) + 
+  geom_point(aes(x = DC1, y = DC2, color = tissue), size = 0.5) +
+  theme_classic() 
+dev.off()
+
+clu <- as.numeric(meta[,'integrated_snn_res.0.3'])
+names(clu) <- rownames(meta)
+pdf(paste0(pdir, 'dm_tissueCelltype.pdf'), width = 4.5, height = 3)
+ggplot(data = data.frame(DC1 = meta[,'DC1'], DC2 = meta[,'DC2'], ctcluster = as.factor(clu))) + 
+  geom_point(aes(x = DC1, y = DC2, color = ctcluster), size = 0.5) +
+  theme_classic() 
+dev.off()
+
+
+## ---------------------
+## construct MST 
+## ---------------------
+# Tmemory(3)->Teffector(1)-> Teffector(3); the other is Tmemory(3)->T(memory2)
+#  6->1->3, and 6->2
+# mc <- exprmclust(t(dm[, 1:2]),reduce = F, cluster = clu)
+mc <- exprmclust(t(dm[, 1:2]),reduce = F)
+pdf(paste0(pdir, 'MST_cluster.pdf'), width = 4, height = 3)
+plot(mc$MSTtree)
+dev.off()
+pdf(paste0(pdir, 'dm_cluster.pdf'), width = 4, height = 3)
+ggplot(data=data.frame(d1=dm[names(mc$clusterid),1],d2=dm[names(mc$clusterid),2],cluster=as.character(mc$clusterid)),aes(x=d1,y=d2,col=cluster)) + geom_point(size=0.5) + theme_classic()+scale_color_brewer(palette = 'Set1') + xlab('DM1') + ylab('DM2') +scale_color_brewer(palette = 'Set1')
+dev.off()
+
+## ---------------------
+## construct pseudotime 
+## ---------------------
+ord <- TSCANorder(mc,orderonly = T,listbranch = T, startcluster = 6)
+# names(ord)
+#  $ backbone 6,8,2,1: chr [1:3503] 
+#  $ branch: 6,4,9,5 : chr [1:433] 
+#  $ branch: 6,4,3,7 :
+p1 <- ord[[1]] ## right
+p2 <- ord[[3]]  ## lower-left
+p3 <- ord[[2]] ## upper-left
+
+pdf(paste0(pdir, 'dm_pseudotime_path1.pdf'), width = 4, height = 3)
+mycolor = c(colorRampPalette(rev(brewer.pal(11, 'RdYlBu')))(length(p1)), 'grey')
+print(ggplot(data.frame(x = c(dm[p1,1], dm[!rownames(dm) %in% p1,1]), y = c(dm[p1,2], dm[!rownames(dm) %in% p1, 2]), time = c(seq(1, length(p1)), rep(NA, sum(!rownames(dm) %in% p1))))) + 
+        geom_point(aes(x = x, y = y, col = time), size = 0.5) + 
+        scale_color_gradientn(colors = mycolor) + 
+        theme_classic() + xlab('DM1') + ylab('DM2'))
+dev.off()
+
+pdf(paste0(pdir, 'dm_pseudotime_path2.pdf'), width = 4, height = 3)
+mycolor = c(colorRampPalette(rev(brewer.pal(11, 'RdYlBu')))(length(p2)), 'grey')
+print(ggplot(data.frame(x = c(dm[p2,1], dm[!rownames(dm) %in% p2,1]), y = c(dm[p2,2], dm[!rownames(dm) %in% p2, 2]), time = c(seq(1, length(p2)), rep(NA, sum(!rownames(dm) %in% p2))))) + 
+        geom_point(aes(x = x, y = y, col = time), size = 0.5) + 
+        scale_color_gradientn(colors = mycolor) + 
+        theme_classic() + xlab('DM1') + ylab('DM2'))
+dev.off()
+
+pdf(paste0(pdir, 'dm_pseudotime_path3.pdf'), width = 4, height = 3)
+mycolor = c(colorRampPalette(rev(brewer.pal(11, 'RdYlBu')))(length(p3)), 'grey')
+print(ggplot(data.frame(x = c(dm[p3,1], dm[!rownames(dm) %in% p3,1]), y = c(dm[p3,2], dm[!rownames(dm) %in% p3, 2]), time = c(seq(1, length(p3)), rep(NA, sum(!rownames(dm) %in% p3))))) + 
+        geom_point(aes(x = x, y = y, col = time), size = 0.5) + 
+        scale_color_gradientn(colors = mycolor) + 
+        theme_classic() + xlab('DM1') + ylab('DM2'))
+dev.off()
+
+
+## ------------------------
+## preparedata for testtime
+## ------------------------
+pt <- seq(1, length(p1))
+names(pt) <- p1
+saveRDS(pt, paste0(rdir, 'path1_pseudotime.rds'))
+saveRDS(saver[, p1], paste0(rdir, 'path1_logsaver.rds'))
+saveRDS(cellanno[p1,], paste0(rdir, 'path1_cellanno.rds'))
+saveRDS(design, paste0(rdir, 'path1_design.rds'))
+
+pt <- seq(1, length(p2))
+names(pt) <- p2
+saveRDS(pt, paste0(rdir, 'path2_pseudotime.rds'))
+saveRDS(saver[, p2], paste0(rdir, 'path2_logsaver.rds'))
+saveRDS(cellanno[p2,], paste0(rdir, 'path2_cellanno.rds'))
+saveRDS(design, paste0(rdir, 'path2_design.rds'))
+
+
+pt <- seq(1, length(p3))
+names(pt) <- p3
+saveRDS(pt, paste0(rdir, 'path3_pseudotime.rds'))
+saveRDS(saver[, p3], paste0(rdir, 'path3_logsaver.rds'))
+saveRDS(cellanno[p3,], paste0(rdir, 'path3_cellanno.rds'))
+saveRDS(design, paste0(rdir, 'path3_design.rds'))
+
+
+
+###########################
+###### trajectory 1 #######
+###########################
+
+setwd(here())
+ddir <- 'pseudotime_lung/data/'
+rdir <- 'pseudotime_lung/result/path1/'
+dir.create(rdir, showWarnings = F, recursive = T)
+pt <-  readRDS(paste0(ddir, 'path1_pseudotime.rds'))
+expr <- readRDS(paste0(ddir, 'path1_logsaver.rds'))
+cellanno <- readRDS(paste0(ddir, 'path1_cellanno.rds'))
+design <- readRDS(paste0(ddir, 'path1_design.rds'))
+
+expr <- expr[rowMeans(expr > 0.01) > 0.01, ]
+source('/home-4/whou10@jhu.edu/scratch/Wenpin/trajectory_variability/function/01_function.R')
+res <- testpt(expr, cellanno = cellanno, pseudotime = pt, design=design, ncores=48, test.type='Time')
+saveRDS(res, paste0(rdir, '/testtime_res.rds'))
+
+
+
+
+###########################
+###### trajectory 2 #######
+###########################
+
+ddir <- 'pseudotime_lung/data/'
+rdir <- 'pseudotime_lung/result/path2/'
+dir.create(rdir, showWarnings = F, recursive = T)
+pt <-  readRDS(paste0(ddir, 'path2_pseudotime.rds'))
+expr <- readRDS(paste0(ddir, 'path2_logsaver.rds'))
+cellanno <- readRDS(paste0(ddir, 'path2_cellanno.rds'))
+design <- readRDS(paste0(ddir, 'path2_design.rds'))
+
+expr <- expr[rowMeans(expr > 0.01) > 0.01, , drop=FALSE]
+source('/home-4/whou10@jhu.edu/scratch/Wenpin/trajectory_variability/function/01_function.R')
+res <- testpt(expr, cellanno = cellanno, pseudotime = pt, design=design, ncores=24, test.type='Time')
+saveRDS(res, paste0(rdir, '/testtime_res.rds'))
+
+
+
+###################################
+###### downstream analysis #######
+###################################
+
+library(here)
+setwd(here())
+source('/home-4/whou10@jhu.edu/scratch/Wenpin/trajectory_variability/function/01_function.R')
+# setwd('/Users/wenpinhou/Dropbox/pardoll/nsclc/')
+# source('/Users/wenpinhou/Dropbox/trajectory_variability/function/01_function.R')
+for (path in c('path1', 'path2', 'path3')){
+ #path = 'path2'
+  rdir <- paste0('pseudotime_lung/result/', path, '/')
+  pdir <- paste0('pseudotime_lung/plot/', path,'/')
+  dir.create(pdir, showWarnings = F, recursive = T)
+  
+  # ---------------------------- #
+  # downstream analysis pipeline #  
+  # ---------------------------- #
+  Res <- readRDS(paste0(rdir, '/testtime_res.rds'))
+  s = Res$statistics
+  s = s[order(s[,1], -s[,3]),]
+  diffgene = rownames(s)[s[,1] < 0.05]
+  str(diffgene)
+  ## --------------
+  ## population fit
+  ## --------------
+  Res$populationFit <- getPopulationFit(Res, gene = rownames(Res$statistics), type = 'time')
+  
+  ## -----------
+  ## clustering
+  ## -----------
+  Res$cluster <- clusterGene(Res, gene = diffgene, type = 'time', k=3)
+  saveRDS(Res, paste0(pdir, 'testtime_res_with_clu.rds'))  
+ 
+  ## --------------
+  ## save diff gene
+  ## --------------
+  allg <- rownames(Res$statistics[Res$statistics[,1]<0.05,,drop=FALSE])
+  res <- Res$statistics[allg, ]
+  res <- res[order(res[,1], -res[,3]), ]
+  write.csv(cbind(res, cluster = Res$cluster[rownames(res)]), paste0(pdir, 'testtime_differential_genes.csv'))
+  
+  ## ---------------
+  ## plotClusterMean
+  ## ----------------
+  pdf(paste0(pdir, 'cluster_mean.pdf'), width = 5, height = 3.5)
+  plotClusterMean(testobj=Res, cluster = Res$cluster, type = 'time')
+  dev.off()
+  
+  ## -----------
+  ## GO analysis
+  ## -----------
+  goRes <- GOEnrich(testobj = Res, type = 'time', sep = ':.*')
+  saveRDS(goRes, paste0(pdir, 'goRes.rds'))
+  
+  nn <- sapply(1:length(goRes), function(i){
+    tmp <- goRes[[i]]
+    write.csv(tmp, paste0(pdir, 'cluster', i, '_GO.csv'))
+    saveRDS(tmp, paste0(pdir, 'cluster', i, '_GO.rds'))
+    tmp <- tmp[tmp[, 'FDR'] < 0.05, ]
+    return(0)
+    print(nrow(tmp))
+  })
+  
+  if (sum(nn) > 0){
+    pdf(paste0(pdir, 'hm_GO_term.pdf'), width = 8, height = 7)
+    print(plotGOEnrich(goRes, n=5))
+    dev.off()
+  }
+    
+  # ------------------------------------------------------
+  # compare original and fitted expression: not tested yet
+  # ------------------------------------------------------
+  colnames(Res$populationFit) <- colnames(Res$expr)
+  png(paste0(pdir, 'fitHm.png'),width = 4000,height = 2500,res = 300)
+  print(plotFitHm(Res, subsampleCell = F, cellHeightTotal = 300))
+  dev.off()
+  
+  png(paste0(pdir, 'fitHm_with_genenames.png'),width = 12000,height = 10000,res = 300)
+  print(plotFitHm(Res, showRowName = T, subsampleCell = F, cellWidthTotal = 300, cellHeightTotal = length(Res$cluster) * 10))
+  dev.off()
+  
+  # gene <- c('GZMA', 'CCL5', 'NKG7', 'GZMK', 'IL6R', 'SELL', 'CD74', 'CCR7', 'IFNGR2', 'TCF7', 'HLA-DPA1', 'IL2RA', 'EOMES', 'IFNG', 'GZMB')
+  Res = readRDS(paste0(pdir, 'testtime_res_with_clu.rds'))
+  fdr <- Res$statistics[,1]
+  names(fdr) <- rownames(Res$statistics)
+  fdr <- sapply(fdr, function(i){
+    if (i < 1e-5){
+      '<1e-5'
+    } else {
+      paste0('=',round(i, 2))
+    }
+  })
+  rownames(Res$populationFit) <- paste0(rownames(Res$populationFit), '; FDR', fdr[rownames(Res$populationFit)])
+  rownames(Res$expr) <- paste0(rownames(Res$expr), '; FDR', fdr[rownames(Res$expr)])
+  gene <- c('GZMA','NKG7', 'GZMK','HLA-DRA','PRF1','IFNG','CCR6','CCL5','ITGB2','CRTAM','RUNX3','EOMES','SELL', 'TCF7','IL7R')
+  str(gene)
+  # 
+  gene <- paste0(gene, '; FDR', fdr[gene])
+  gene <- gene[gene %in% rownames(Res$populationFit)]
+  png(paste0(pdir, 'example_genes_pullplot.png'),width = 2000,height = 1800, res = 300)
+  plotGeneCellAndPopulation(Res, gene = gene, dot.quantile = 0.99)
+  dev.off()
+  
+  
+  Res = readRDS(paste0(pdir, 'testtime_res_with_clu.rds'))
+  gene <- c('GZMA','NKG7', 'GZMK','HLA-DRA','PRF1','IFNG','CCR6','CCL5','ITGB2','CRTAM','RUNX3','EOMES','SELL', 'TCF7','IL7R')
+  gene <- gene[gene %in% rownames(Res$populationFit)]
+  png(paste0(pdir, 'example_genes.png'),width = 2000,height = 1800, res = 300)
+  plotGene(Res, gene, plot.point = T, point.size =0.2)
+  dev.off()
+  
+  if (path == 'path1'){
+    s = Res$statistics
+    s = s[order(s[,1], -s[,3]), ]
+    s = s[s[,1] < 0.05, ]
+    str(s)
+    dg = rownames(s)[1:30]
+    str(dg)
+    dg = unique(c(dg, gene))
+    Res$populationFit <- Res$populationFit[dg, ]
+    colnames(Res$populationFit) <- colnames(Res$expr)
+    Res$cluster <- Res$cluster[dg]
+    png(paste0(pdir, 'fitHm_with_genenames_30_and_selected.png'),width = 6000,height = 3000,res = 300)
+    plotFitHm(Res, showRowName = T, subsampleCell = F, cellWidthTotal = 300, cellHeightTotal = length(Res$cluster) * 10)
+    dev.off()
+  }
+}
