@@ -2,3 +2,6 @@
 
 * PCA_CCA: perform Principal Component Analysis and conduct Canonical Correlation Analysis.
 * Monte_Carlo_simulation: perform complementary test for Fig4e.
+* Raisin: perform differential test for CD3 T cell clusters
+* Pseudotime: perform differential analysis along pseudotime axis
+
